@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeftIcon, ArrowRightIcon, BackIcon, CloseIcon, PlusIcon } from "@/components/Icons";
 import { BOTTOM_SIZES, SHOE_SIZES, TOP_SIZES } from "@/lib/domain/measurements";
-import { FIT_LABELS, LENGTH_LABELS, MAX_ITEMS, MAX_PHOTOS, POSE_LABELS } from "@/lib/domain/posts";
-import type { Category, FitRating, LengthRating } from "@/lib/domain/types";
+import { FIT_LABELS, LENGTH_LABELS, MAX_ITEMS, MAX_PHOTOS, photoUrl, POSE_LABELS } from "@/lib/domain/posts";
+import type { Category, FitRating, LengthRating, PostItem } from "@/lib/domain/types";
 import { createClient } from "@/lib/supabase/client";
 import { uploadImage } from "@/lib/upload";
 
-type Photo = { key: string; preview: string; path: string | null; pose: string | null; failed?: boolean };
+// existing: düzenlemede zaten paylaşımda olan fotoğraf (iptal edilirse silinmemeli)
+type Photo = { key: string; preview: string; path: string | null; pose: string | null; failed?: boolean; existing?: boolean };
 type Item = {
   key: string;
   brand: string;
@@ -31,13 +32,38 @@ const newItem = (): Item => ({
 
 const POSE_ORDER = ["front", "side", "sitting"];
 
-export function NewPostForm({ userId, categories }: { userId: string; categories: Category[] }) {
+export type EditablePost = {
+  id: string;
+  caption: string | null;
+  photos: { path: string; pose: string | null }[];
+  items: PostItem[];
+};
+
+const fromPostItem = (it: PostItem): Item => ({
+  key: crypto.randomUUID(),
+  brand: it.brand ?? "",
+  product_name: it.product_name ?? "",
+  category: it.category ?? "",
+  size_bought: it.size_bought,
+  fit_rating: it.fit_rating ?? "",
+  length_rating: it.length_rating ?? "",
+  fit_note: it.fit_note ?? "",
+  fabric_note: it.fabric_note ?? "",
+  product_url: it.product_url ?? "",
+});
+
+// Yeni paylaşım ve düzenleme aynı formu kullanır; `initial` varsa düzenleme modudur.
+export function PostForm({ userId, categories, initial }: { userId: string; categories: Category[]; initial?: EditablePost }) {
   const router = useRouter();
   const supabase = createClient();
   const [step, setStep] = useState(1);
-  const [photos, setPhotos] = useState<Photo[]>([]);
-  const [items, setItems] = useState<Item[]>([newItem()]);
-  const [caption, setCaption] = useState("");
+  const [photos, setPhotos] = useState<Photo[]>(
+    () => initial?.photos.map((p) => ({ key: crypto.randomUUID(), preview: photoUrl(p.path)!, path: p.path, pose: p.pose, existing: true })) ?? [],
+  );
+  const [items, setItems] = useState<Item[]>(() => initial?.items.map(fromPostItem) ?? [newItem()]);
+  const [caption, setCaption] = useState(initial?.caption ?? "");
+  // Düzenlemede kaldırılan eski fotoğraflar; sadece kaydedilince Storage'dan silinir
+  const [removedPaths, setRemovedPaths] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -70,7 +96,8 @@ export function NewPostForm({ userId, categories }: { userId: string; categories
 
   function removePhoto(key: string) {
     const ph = photos.find((p) => p.key === key);
-    if (ph?.path) supabase.storage.from("post-photos").remove([ph.path]);
+    if (ph?.existing && ph.path) setRemovedPaths((r) => [...r, ph.path!]);
+    else if (ph?.path) supabase.storage.from("post-photos").remove([ph.path]);
     setPhotos((p) => p.filter((x) => x.key !== key));
   }
 
@@ -92,20 +119,29 @@ export function NewPostForm({ userId, categories }: { userId: string; categories
   async function share() {
     setBusy(true);
     setError(null);
-    const { data, error } = await supabase.rpc("create_post", {
+    const payload = {
       p_caption: caption,
       p_photos: photos.map((p) => ({ path: p.path, pose: p.pose })),
       p_items: items.map((it) => ({ ...it, key: undefined, product_url: normalizeUrl(it.product_url) })),
-    });
+    };
+    let postId: string | null;
+    if (initial) {
+      const { error } = await supabase.rpc("update_post", { p_id: initial.id, ...payload });
+      postId = error ? null : initial.id;
+      if (!error && removedPaths.length) await supabase.storage.from("post-photos").remove(removedPaths);
+    } else {
+      const { data, error } = await supabase.rpc("create_post", payload);
+      postId = error ? null : data;
+    }
     setBusy(false);
-    if (error || !data) return setError("Paylaşılamadı. Bilgileri kontrol edip tekrar dener misin?");
-    router.replace(`/p/${data}`);
+    if (!postId) return setError(initial ? "Kaydedilemedi. Bilgileri kontrol edip tekrar dener misin?" : "Paylaşılamadı. Bilgileri kontrol edip tekrar dener misin?");
+    router.replace(`/p/${postId}`);
     router.refresh();
   }
 
   async function cancel() {
-    if ((photos.length || items.some((i) => i.brand)) && !confirm("Paylaşımdan vazgeçilsin mi?")) return;
-    const paths = photos.map((p) => p.path).filter(Boolean) as string[];
+    if ((photos.length || items.some((i) => i.brand)) && !confirm(initial ? "Değişiklikler kaydedilmeden çıkılsın mı?" : "Paylaşımdan vazgeçilsin mi?")) return;
+    const paths = photos.filter((p) => !p.existing).map((p) => p.path).filter(Boolean) as string[];
     if (paths.length) await supabase.storage.from("post-photos").remove(paths);
     router.back();
   }
@@ -116,7 +152,7 @@ export function NewPostForm({ userId, categories }: { userId: string; categories
         <button type="button" onClick={step === 1 ? cancel : () => setStep(step - 1)} className="-ml-2 rounded-full p-2" aria-label="Geri">
           {step === 1 ? <CloseIcon className="h-5 w-5" /> : <BackIcon className="h-5 w-5" />}
         </button>
-        <p className="text-sm font-semibold">Kombinini paylaş · {step}/3</p>
+        <p className="text-sm font-semibold">{initial ? "Paylaşımı düzenle" : "Kombinini paylaş"} · {step}/3</p>
         <span className="w-9" />
       </header>
 
@@ -128,7 +164,7 @@ export function NewPostForm({ userId, categories }: { userId: string; categories
             {photos.map((p, i) => (
               <div key={p.key} className="relative">
                 <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-placeholder">
-                  <Image src={p.preview} alt="" fill unoptimized className={`object-cover ${p.path ? "" : "opacity-50"}`} />
+                  <Image src={p.preview} alt="" fill unoptimized={!p.existing} sizes="33vw" className={`object-cover ${p.path ? "" : "opacity-50"}`} />
                   {!p.path && !p.failed && <span className="absolute inset-0 flex items-center justify-center text-xs font-semibold">Yükleniyor…</span>}
                   {p.failed && <span className="absolute inset-0 flex items-center justify-center bg-terracotta/70 p-2 text-center text-xs text-cream">Yüklenemedi</span>}
                   {i === 0 && <span className="absolute left-1.5 top-1.5 rounded bg-ink/60 px-1.5 text-[10px] text-cream">Kapak</span>}
@@ -206,7 +242,7 @@ export function NewPostForm({ userId, categories }: { userId: string; categories
           <p className="eyebrow mt-6 mb-2">Önizleme</p>
           <div className="flex gap-3 rounded-[var(--radius-card)] border border-line bg-card p-3">
             <div className="relative aspect-[3/4] w-24 shrink-0 overflow-hidden rounded-lg bg-placeholder">
-              {photos[0] && <Image src={photos[0].preview} alt="" fill unoptimized className="object-cover" />}
+              {photos[0] && <Image src={photos[0].preview} alt="" fill unoptimized={!photos[0].existing} sizes="96px" className="object-cover" />}
             </div>
             <ul className="min-w-0 flex-1 space-y-2 text-sm">
               {items.map((it) => (
@@ -217,9 +253,9 @@ export function NewPostForm({ userId, categories }: { userId: string; categories
               ))}
             </ul>
           </div>
-          <p className="mt-3 text-xs text-muted">Profilindeki güncel ölçüler bu paylaşıma kaydedilir (gizlilik ayarlarınla birlikte), böylece ileride ölçülerin değişse de bu kombin anlamlı kalır.</p>
+          {!initial && <p className="mt-3 text-xs text-muted">Profilindeki güncel ölçüler bu paylaşıma kaydedilir (gizlilik ayarlarınla birlikte), böylece ileride ölçülerin değişse de bu kombin anlamlı kalır.</p>}
           {error && <p className="mt-3 rounded-lg bg-terracotta/10 px-3 py-2 text-sm text-terracotta">{error}</p>}
-          <Next disabled={busy} onClick={share}>{busy ? "Paylaşılıyor…" : "Paylaş"}</Next>
+          <Next disabled={busy} onClick={share}>{busy ? (initial ? "Kaydediliyor…" : "Paylaşılıyor…") : initial ? "Kaydet" : "Paylaş"}</Next>
         </section>
       )}
     </main>

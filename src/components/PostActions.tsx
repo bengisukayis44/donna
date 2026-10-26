@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -73,7 +74,10 @@ export function PostActions({
         </button>
         <div className="ml-auto">
           {isOwner ? (
-            <button type="button" onClick={remove} className="px-2 py-1.5 text-sm text-muted">Sil</button>
+            <div className="flex items-center">
+              <Link href={`/p/${postId}/duzenle`} className="px-2 py-1.5 text-sm font-semibold text-ink">Düzenle</Link>
+              <button type="button" onClick={remove} className="px-2 py-1.5 text-sm text-muted">Sil</button>
+            </div>
           ) : (
             <button type="button" onClick={() => !requireLogin() && setReporting(true)} className="px-2 py-1.5 text-muted" aria-label="Şikayet et">
               <FlagIcon className="h-5 w-5" />

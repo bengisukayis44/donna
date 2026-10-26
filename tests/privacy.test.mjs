@@ -143,3 +143,29 @@ test("başkasının paylaşımı silinemez, gizlenen paylaşım herkese görünm
   const { error } = await users.b.client.rpc("admin_set_post_status", { p_post: postId, p_status: "hidden" });
   assert.ok(error, "admin olmayan kullanıcı paylaşımı gizleyebildi");
 });
+
+test("düzenleme: sahibi güncelleyebilir, başkası güncelleyemez, ölçü snapshot'ı korunur", async () => {
+  const { data: before } = await users.b.client.rpc("get_post", { p_id: postId });
+  const photos = before.photos;
+  const items = [{ brand: "mango", product_name: "Wide Leg", category: "pantolon", size_bought: "m", length_rating: "long" }];
+
+  const { error: denied } = await users.b.client.rpc("update_post", { p_id: postId, p_caption: "x", p_photos: photos, p_items: items });
+  assert.ok(denied, "başka kullanıcı paylaşımı düzenleyebildi");
+
+  const { error } = await users.a.client.rpc("update_post", { p_id: postId, p_caption: "güncel", p_photos: photos, p_items: items });
+  assert.ifError(error);
+  const { data: after } = await users.b.client.rpc("get_post", { p_id: postId });
+  assert.equal(after.caption, "güncel");
+  assert.equal(after.items[0].brand, "Mango");
+  assert.equal(after.items[0].size_bought, "M");
+  assert.deepEqual(after.measurements, before.measurements);
+});
+
+test("marka listesi genişletildi ve yinelenen marka yok", async () => {
+  const { count } = await admin.from("brands").select("*", { count: "exact", head: true });
+  assert.ok(count >= 200, `beklenen ≥200 marka, gelen ${count}`);
+  const { data } = await admin.from("brands").select("name");
+  const norm = (s) => s.toLocaleLowerCase("tr-TR");
+  const names = data.map((b) => norm(b.name));
+  assert.equal(new Set(names).size, names.length);
+});
