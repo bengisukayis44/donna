@@ -22,7 +22,8 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  await supabase.auth.getUser();
+  // getClaims JWT'yi yerelde doğrular (asimetrik anahtar); süresi dolmuşsa oturumu yeniler
+  await supabase.auth.getClaims();
   return response;
 }
 

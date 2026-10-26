@@ -10,25 +10,31 @@ export type Viewer = {
   isAdmin: boolean;
 };
 
+// Oturumdaki kullanıcı. JWT yerelde doğrulanır (Supabase'e ağ isteği yok). İstek başına bir kez çalışır.
+const getAuth = cache(async () => {
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getClaims();
+  const claims = data?.claims;
+  return { supabase, userId: claims?.sub ?? null, email: claims?.email as string | undefined };
+});
+
 // Giriş yapmış kullanıcı (yoksa null). Aynı istek içinde bir kez çalışır.
 export const getViewer = cache(async (): Promise<Viewer | null> => {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { supabase, userId, email } = await getAuth();
+  if (!userId) return null;
   const [{ data: profile }, { data: priv }, { data: isAdmin }] = await Promise.all([
-    supabase.from("profiles").select("id, username, display_name, avatar_url, bio").eq("id", user.id).single(),
-    supabase.from("profile_private").select("*").eq("user_id", user.id).single(),
+    supabase.from("profiles").select("id, username, display_name, avatar_url, bio").eq("id", userId).single(),
+    supabase.from("profile_private").select("*").eq("user_id", userId).single(),
     supabase.rpc("is_admin"),
   ]);
   if (!profile || !priv) return null;
-  return { id: user.id, email: user.email, profile, priv, isAdmin: !!isAdmin };
+  return { id: userId, email, profile, priv, isAdmin: !!isAdmin };
 });
 
 export const getMyMeasurements = cache(async (): Promise<BodyMeasurements | null> => {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data } = await supabase.from("body_measurements").select("*").eq("user_id", user.id).maybeSingle();
+  const { supabase, userId } = await getAuth();
+  if (!userId) return null;
+  const { data } = await supabase.from("body_measurements").select("*").eq("user_id", userId).maybeSingle();
   return data;
 });
 

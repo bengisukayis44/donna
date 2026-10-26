@@ -19,7 +19,6 @@ export default async function SearchPage(props: PageProps<"/ara">) {
   const sp = await props.searchParams;
   const tab = str(sp.sekme) ?? "paylasimlar";
   const q = str(sp.q);
-  const viewer = await getViewer();
   const supabase = await createClient();
 
   const params: SearchParams = {
@@ -31,12 +30,21 @@ export default async function SearchPage(props: PageProps<"/ara">) {
     heightMax: num(sp.boymax),
     weightMin: num(sp.kilomin),
     weightMax: num(sp.kilomax),
-    nearMe: viewer ? sp.yakin === "1" : false,
+    nearMe: sp.yakin === "1", // misafirde yakınlık puanı olmadığından sonuç boş döner
     sort: (["new", "near", "popular"] as const).find((s) => s === sp.sirala) ?? "new",
     attrs: str(sp.renk) ? { color: str(sp.renk)! } : undefined,
   };
 
-  const [{ data: categories }, { data: colors }, brandName] = await Promise.all([
+  // Sonuçlar, kullanıcı ve filtre seçenekleri aynı anda çekilir
+  const resultsQuery =
+    tab === "markalar"
+      ? supabase.rpc("search_brands", { p_q: q ?? "", p_limit: 30 })
+      : tab === "kullanicilar"
+        ? q ? supabase.rpc("search_users", { p_q: q }) : Promise.resolve({ data: [] })
+        : supabase.rpc("search_posts", toRpcParams(params));
+  const [viewer, { data: resultData }, { data: categories }, { data: colors }, brandName] = await Promise.all([
+    getViewer(),
+    resultsQuery,
     supabase.from("categories").select("*").order("position"),
     supabase.from("attribute_options").select("value, label, swatch").eq("attr_key", "color").order("position"),
     params.brand ? supabase.from("brands").select("name").eq("slug", params.brand).maybeSingle().then((r) => r.data?.name) : null,
@@ -44,7 +52,7 @@ export default async function SearchPage(props: PageProps<"/ara">) {
 
   let results: React.ReactNode;
   if (tab === "markalar") {
-    const { data } = await supabase.rpc("search_brands", { p_q: q ?? "", p_limit: 30 });
+    const data = resultData;
     results = (
       <ul className="divide-y divide-line rounded-[var(--radius-card)] border border-line bg-card">
         {(data ?? []).map((b: { id: string; name: string; slug: string; post_count: number }) => (
@@ -59,7 +67,7 @@ export default async function SearchPage(props: PageProps<"/ara">) {
       </ul>
     );
   } else if (tab === "kullanicilar") {
-    const { data } = q ? await supabase.rpc("search_users", { p_q: q }) : { data: [] };
+    const data = resultData;
     results = (
       <ul className="divide-y divide-line rounded-[var(--radius-card)] border border-line bg-card">
         {(data ?? []).map((u: { username: string; display_name: string | null; avatar_url: string | null }) => (
@@ -77,7 +85,7 @@ export default async function SearchPage(props: PageProps<"/ara">) {
       </ul>
     );
   } else {
-    const { data } = await supabase.rpc("search_posts", toRpcParams(params));
+    const data = resultData;
     results = (
       <PostGrid
         initial={(data ?? []) as PostCardData[]}

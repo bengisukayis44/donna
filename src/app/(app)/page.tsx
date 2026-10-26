@@ -10,7 +10,13 @@ import { getMyMeasurements, getViewer } from "@/lib/viewer";
 export default async function FeedPage(props: PageProps<"/">) {
   const { tab } = await props.searchParams;
   const near = tab === "yakin";
-  const viewer = await getViewer();
+  const params: SearchParams = near ? { nearMe: true, minScore: 0, sort: "near" } : { sort: "new" };
+  // Birbirini beklemeden paralel çek
+  const [viewer, measurements, { data }] = await Promise.all([
+    getViewer(),
+    near ? getMyMeasurements() : null,
+    createClient().then((supabase) => supabase.rpc("search_posts", toRpcParams(params))),
+  ]);
 
   let content: React.ReactNode;
   if (near && !viewer) {
@@ -22,7 +28,7 @@ export default async function FeedPage(props: PageProps<"/">) {
         cta="Kayıt ol"
       />
     );
-  } else if (near && !hasAnyMeasurement(await getMyMeasurements())) {
+  } else if (near && !hasAnyMeasurement(measurements)) {
     content = (
       <Callout
         title="Ölçülerini ekle, sana benzeyenleri görelim"
@@ -32,9 +38,6 @@ export default async function FeedPage(props: PageProps<"/">) {
       />
     );
   } else {
-    const params: SearchParams = near ? { nearMe: true, minScore: 0, sort: "near" } : { sort: "new" };
-    const supabase = await createClient();
-    const { data } = await supabase.rpc("search_posts", toRpcParams(params));
     content = (
       <PostGrid
         initial={(data ?? []) as PostCardData[]}
@@ -70,7 +73,7 @@ export default async function FeedPage(props: PageProps<"/">) {
   );
 }
 
-function hasAnyMeasurement(m: Awaited<ReturnType<typeof getMyMeasurements>>) {
+function hasAnyMeasurement(m: Awaited<ReturnType<typeof getMyMeasurements>> | null) {
   return !!m && [m.height_cm, m.weight_kg, m.bust_cm, m.waist_cm, m.hip_cm, m.inseam_cm].filter((v) => v != null).length >= 2;
 }
 

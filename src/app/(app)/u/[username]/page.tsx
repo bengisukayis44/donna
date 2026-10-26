@@ -21,18 +21,26 @@ export default async function ProfilePage(props: PageProps<"/u/[username]">) {
   const { sekme } = await props.searchParams;
   const username = decodeURIComponent(raw).toLowerCase();
   const supabase = await createClient();
-  const [{ data }, viewer] = await Promise.all([supabase.rpc("get_profile", { p_username: username }), getViewer()]);
+  const wantsSaved = sekme === "kaydedilenler";
+  // Profil, paylaşımlar ve (kendi profilinse) ölçüler/uyarılar aynı anda çekilir.
+  // Kaydedilenler sadece sahibine gösterildiği için o sekme profil doğrulandıktan sonra çekilir.
+  const [{ data }, viewer, ownPosts, mine, { data: myWarnings }] = await Promise.all([
+    supabase.rpc("get_profile", { p_username: username }),
+    getViewer(),
+    wantsSaved ? null : supabase.rpc("search_posts", toRpcParams({ username })),
+    getMyMeasurements(),
+    supabase.from("user_warnings").select("id, message, created_at").is("seen_at", null),
+  ]);
   const profile = data as PublicProfile | null;
   if (!profile) notFound();
 
-  const savedTab = profile.is_me && sekme === "kaydedilenler";
+  const savedTab = profile.is_me && wantsSaved;
   const params: SearchParams = savedTab ? { saved: true } : { username };
-  const { data: posts } = await supabase.rpc("search_posts", toRpcParams(params));
+  const { data: posts } = ownPosts ?? (await supabase.rpc("search_posts", toRpcParams(params)));
   const near = proximityLabel(profile.proximity);
 
   let completion: React.ReactNode = null;
   if (profile.is_me && viewer) {
-    const mine = await getMyMeasurements();
     const percent = profileCompletion(viewer.profile, mine);
     const hiddenUntil = viewer.priv.completion_card_hidden_until;
     if (percent < 100 && (!hiddenUntil || new Date(hiddenUntil) < new Date())) {
@@ -40,9 +48,7 @@ export default async function ProfilePage(props: PageProps<"/u/[username]">) {
     }
   }
 
-  const { data: warnings } = profile.is_me
-    ? await supabase.from("user_warnings").select("id, message, created_at").is("seen_at", null)
-    : { data: null };
+  const warnings = profile.is_me ? myWarnings : null;
 
   return (
     <main className="px-4 pt-4">
