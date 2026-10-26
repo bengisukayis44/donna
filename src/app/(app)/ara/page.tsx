@@ -33,10 +33,12 @@ export default async function SearchPage(props: PageProps<"/ara">) {
     weightMax: num(sp.kilomax),
     nearMe: viewer ? sp.yakin === "1" : false,
     sort: (["new", "near", "popular"] as const).find((s) => s === sp.sirala) ?? "new",
+    attrs: str(sp.renk) ? { color: str(sp.renk)! } : undefined,
   };
 
-  const [{ data: categories }, brandName] = await Promise.all([
+  const [{ data: categories }, { data: colors }, brandName] = await Promise.all([
     supabase.from("categories").select("*").order("position"),
+    supabase.from("attribute_options").select("value, label, swatch").eq("attr_key", "color").order("position"),
     params.brand ? supabase.from("brands").select("name").eq("slug", params.brand).maybeSingle().then((r) => r.data?.name) : null,
   ]);
 
@@ -92,6 +94,7 @@ export default async function SearchPage(props: PageProps<"/ara">) {
         categories={(categories ?? []) as Category[]}
         loggedIn={!!viewer}
         brandName={brandName ?? null}
+        colors={colors ?? []}
       />
       <div className="mt-4">{results}</div>
     </main>

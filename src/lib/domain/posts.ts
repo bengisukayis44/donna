@@ -39,8 +39,14 @@ export function toRpcParams(p: SearchParams) {
     p_saved: p.saved ?? false,
     p_limit: p.limit ?? PAGE_SIZE,
     p_offset: p.offset ?? 0,
+    p_attrs: p.attrs && Object.keys(p.attrs).length ? p.attrs : null,
   };
 }
 
 // Türkçe büyük harf
 export const upperTr = (s: string) => s.toLocaleUpperCase("tr-TR");
+
+// Bu kategoride sorulan özellikler
+export function attributesFor<T extends { categories: string[] | null }>(defs: T[], category: string): T[] {
+  return defs.filter((d) => !d.categories || (!!category && d.categories.includes(category)));
+}

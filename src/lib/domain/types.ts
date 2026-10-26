@@ -86,6 +86,22 @@ export type PostItem = {
   fit_note: string | null;
   fabric_note: string | null;
   product_url: string | null;
+  attributes: ItemAttributes;
+  attribute_labels: { key: string; label: string; values: { value: string; label: string; swatch: string | null }[] }[];
+};
+
+// Ürünün gelişmiş detayları: {"color": ["siyah"], "sleeve": ["uzun"]}
+export type ItemAttributes = Record<string, string[]>;
+
+export type AttributeOption = { value: string; label: string; swatch: string | null; position: number };
+export type AttributeDef = {
+  key: string;
+  label: string;
+  multi: boolean;
+  max_select: number;
+  categories: string[] | null;
+  position: number;
+  attribute_options: AttributeOption[];
 };
 
 export type PostDetail = {
@@ -131,6 +147,7 @@ export type SearchParams = {
   sort?: "new" | "near" | "popular";
   username?: string;
   saved?: boolean;
+  attrs?: Record<string, string>;
   limit?: number;
   offset?: number;
 };

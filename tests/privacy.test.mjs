@@ -169,3 +169,33 @@ test("marka listesi genişletildi ve yinelenen marka yok", async () => {
   const names = data.map((b) => norm(b.name));
   assert.equal(new Set(names).size, names.length);
 });
+
+test("gelişmiş detaylar: geçersizler atılır, aramada ve renk filtresinde çalışır", async () => {
+  const { data: before } = await users.a.client.rpc("get_post", { p_id: postId });
+  const items = [{
+    brand: "Zara", category: "gomlek", size_bought: "S",
+    attributes: {
+      color: ["siyah", "beyaz", "kirmizi", "mor"], // en fazla 3 → mor atılır
+      fabric: ["keten"],
+      sleeve: ["uzun", "kisa"],                    // tekli → ilk geçerli kalır
+      bogus: ["x"],                                // bilinmeyen anahtar
+      neckline: ["olmayan-deger"],                 // bilinmeyen değer
+    },
+  }];
+  const { error } = await users.a.client.rpc("update_post", { p_id: postId, p_caption: "", p_photos: before.photos, p_items: items });
+  assert.ifError(error);
+
+  const { data } = await anon().rpc("get_post", { p_id: postId });
+  const attrs = data.items[0].attributes;
+  assert.deepEqual(attrs.color, ["siyah", "beyaz", "kirmizi"]);
+  assert.deepEqual(attrs.fabric, ["keten"]);
+  assert.equal(attrs.sleeve.length, 1);
+  assert.equal(attrs.bogus, undefined);
+  assert.equal(attrs.neckline, undefined);
+  assert.ok(data.items[0].attribute_labels.some((a) => a.label === "Renk"));
+
+  const find = async (params) => (await anon().rpc("search_posts", { p_limit: 50, ...params })).data.some((p) => p.id === postId);
+  assert.ok(await find({ p_q: "siyah keten gomlek" }), "özellik etiketleriyle arama");
+  assert.ok(await find({ p_attrs: { color: "kirmizi" } }), "renk filtresi");
+  assert.ok(!(await find({ p_attrs: { color: "yesil" } })), "yanlış renk filtresi eşleşmemeli");
+});

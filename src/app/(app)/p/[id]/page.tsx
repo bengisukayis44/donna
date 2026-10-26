@@ -117,6 +117,23 @@ function ItemCard({ item }: { item: PostItem }) {
           {item.length_rating && <Rating label="Boy" value={LENGTH_LABELS[item.length_rating]} />}
         </div>
       )}
+      {item.attribute_labels?.length > 0 && (
+        <dl className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
+          {item.attribute_labels.map((a) => (
+            <div key={a.key} className="flex items-center gap-1.5">
+              <dt className="text-muted">{a.label}:</dt>
+              <dd className="flex items-center gap-1 font-semibold">
+                {a.values.map((v, i) => (
+                  <span key={v.value} className="flex items-center gap-1">
+                    {v.swatch && <span className="h-3 w-3 rounded-full border border-line" style={{ background: v.swatch }} />}
+                    {v.label}{i < a.values.length - 1 ? "," : ""}
+                  </span>
+                ))}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
       {item.fit_note && <p className="mt-3 text-sm leading-relaxed"><span className="text-muted">Fit: </span>{item.fit_note}</p>}
       {item.fabric_note && <p className="mt-1 text-sm leading-relaxed"><span className="text-muted">Kumaş: </span>{item.fabric_note}</p>}
       {item.product_url && (

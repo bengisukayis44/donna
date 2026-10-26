@@ -12,9 +12,10 @@ const TABS = [
 ] as const;
 
 export function SearchControls({
-  tab, categories, loggedIn, brandName,
+  tab, categories, loggedIn, brandName, colors,
 }: {
   tab: string; categories: Category[]; loggedIn: boolean; brandName: string | null;
+  colors: { value: string; label: string; swatch: string | null }[];
 }) {
   const router = useRouter();
   const path = usePathname();
@@ -31,7 +32,7 @@ export function SearchControls({
     router.replace(`${path}?${next.toString()}`, { scroll: false });
   };
 
-  const filterCount = ["kategori", "beden", "boymin", "boymax", "kilomin", "kilomax", "yakin"].filter((k) => sp.get(k)).length;
+  const filterCount = ["kategori", "beden", "renk", "boymin", "boymax", "kilomin", "kilomax", "yakin"].filter((k) => sp.get(k)).length;
   const field = "w-full rounded-xl border border-line bg-card px-3 py-2 text-[15px]";
 
   return (
@@ -98,12 +99,32 @@ export function SearchControls({
                 <option value="">Tüm kategoriler</option>
                 {categories.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}
               </select>
+              <div>
+                <p className="mb-1.5 text-sm text-muted">Renk</p>
+                <div className="flex flex-wrap gap-2">
+                  {colors.map((c) => {
+                    const on = sp.get("renk") === c.value;
+                    return (
+                      <button
+                        key={c.value}
+                        type="button"
+                        title={c.label}
+                        aria-label={c.label}
+                        aria-pressed={on}
+                        onClick={() => set({ renk: on ? null : c.value })}
+                        className={`h-7 w-7 rounded-full border ${on ? "ring-2 ring-terracotta ring-offset-2 ring-offset-card" : "border-line"}`}
+                        style={{ background: c.swatch ?? undefined }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
               <input defaultValue={sp.get("beden") ?? ""} onBlur={(e) => set({ beden: e.target.value.trim() || null })} placeholder="Beden (ör. 38, M)" className={field} />
               <Range label="Boy (cm)" min="boymin" max="boymax" sp={sp} set={set} />
               <Range label="Kilo (kg)" min="kilomin" max="kilomax" sp={sp} set={set} />
               <button
                 type="button"
-                onClick={() => set({ kategori: null, beden: null, boymin: null, boymax: null, kilomin: null, kilomax: null, yakin: null })}
+                onClick={() => set({ kategori: null, beden: null, renk: null, boymin: null, boymax: null, kilomin: null, kilomax: null, yakin: null })}
                 className="text-sm text-muted underline"
               >
                 Filtreleri temizle

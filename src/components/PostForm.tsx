@@ -3,10 +3,11 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { AdvancedDetails } from "@/components/AdvancedDetails";
 import { ArrowLeftIcon, ArrowRightIcon, BackIcon, CloseIcon, PlusIcon } from "@/components/Icons";
 import { BOTTOM_SIZES, SHOE_SIZES, TOP_SIZES } from "@/lib/domain/measurements";
-import { FIT_LABELS, LENGTH_LABELS, MAX_ITEMS, MAX_PHOTOS, photoUrl, POSE_LABELS } from "@/lib/domain/posts";
-import type { Category, FitRating, LengthRating, PostItem } from "@/lib/domain/types";
+import { attributesFor, FIT_LABELS, LENGTH_LABELS, MAX_ITEMS, MAX_PHOTOS, photoUrl, POSE_LABELS } from "@/lib/domain/posts";
+import type { AttributeDef, Category, FitRating, ItemAttributes, LengthRating, PostItem } from "@/lib/domain/types";
 import { createClient } from "@/lib/supabase/client";
 import { uploadImage } from "@/lib/upload";
 
@@ -22,12 +23,13 @@ type Item = {
   length_rating: LengthRating | "";
   fit_note: string;
   fabric_note: string;
+  attributes: ItemAttributes;
   product_url: string;
 };
 
 const newItem = (): Item => ({
   key: crypto.randomUUID(), brand: "", product_name: "", category: "", size_bought: "",
-  fit_rating: "", length_rating: "", fit_note: "", fabric_note: "", product_url: "",
+  fit_rating: "", length_rating: "", fit_note: "", fabric_note: "", product_url: "", attributes: {},
 });
 
 const POSE_ORDER = ["front", "side", "sitting"];
@@ -50,10 +52,15 @@ const fromPostItem = (it: PostItem): Item => ({
   fit_note: it.fit_note ?? "",
   fabric_note: it.fabric_note ?? "",
   product_url: it.product_url ?? "",
+  attributes: it.attributes ?? {},
 });
 
 // Yeni paylaşım ve düzenleme aynı formu kullanır; `initial` varsa düzenleme modudur.
-export function PostForm({ userId, categories, initial }: { userId: string; categories: Category[]; initial?: EditablePost }) {
+export function PostForm({
+  userId, categories, attributeDefs, initial,
+}: {
+  userId: string; categories: Category[]; attributeDefs: AttributeDef[]; initial?: EditablePost;
+}) {
   const router = useRouter();
   const supabase = createClient();
   const [step, setStep] = useState(1);
@@ -122,7 +129,15 @@ export function PostForm({ userId, categories, initial }: { userId: string; cate
     const payload = {
       p_caption: caption,
       p_photos: photos.map((p) => ({ path: p.path, pose: p.pose })),
-      p_items: items.map((it) => ({ ...it, key: undefined, product_url: normalizeUrl(it.product_url) })),
+      p_items: items.map((it) => ({
+        ...it,
+        key: undefined,
+        product_url: normalizeUrl(it.product_url),
+        // Sadece bu kategoride geçerli özellikler gönderilir (kategori sonradan değiştiyse eskiler atılır)
+        attributes: Object.fromEntries(
+          attributesFor(attributeDefs, it.category).map((d) => [d.key, it.attributes[d.key] ?? []]).filter(([, v]) => v.length),
+        ),
+      })),
     };
     let postId: string | null;
     if (initial) {
@@ -214,6 +229,7 @@ export function PostForm({ userId, categories, initial }: { userId: string; cate
                 index={i}
                 item={it}
                 categories={categories}
+                attributeDefs={attributeDefs}
                 onChange={(patch) => updateItem(it.key, patch)}
                 onRemove={items.length > 1 ? () => setItems((l) => l.filter((x) => x.key !== it.key)) : undefined}
               />
@@ -279,9 +295,9 @@ function normalizeUrl(u: string) {
 }
 
 function ItemForm({
-  index, item, categories, onChange, onRemove,
+  index, item, categories, attributeDefs, onChange, onRemove,
 }: {
-  index: number; item: Item; categories: Category[]; onChange: (p: Partial<Item>) => void; onRemove?: () => void;
+  index: number; item: Item; categories: Category[]; attributeDefs: AttributeDef[]; onChange: (p: Partial<Item>) => void; onRemove?: () => void;
 }) {
   const [more, setMore] = useState(false);
   const group = categories.find((c) => c.slug === item.category)?.group_key;
@@ -319,6 +335,7 @@ function ItemForm({
         </div>
         <Segment label="Kalıp" options={FIT_LABELS} value={item.fit_rating} onChange={(v) => onChange({ fit_rating: v as FitRating | "" })} />
         <Segment label="Boy" options={LENGTH_LABELS} value={item.length_rating} onChange={(v) => onChange({ length_rating: v as LengthRating | "" })} />
+        <AdvancedDetails defs={attributeDefs} category={item.category} value={item.attributes} onChange={(attributes) => onChange({ attributes })} />
         {more ? (
           <>
             <textarea value={item.fit_note} onChange={(e) => onChange({ fit_note: e.target.value })} maxLength={500} rows={2} placeholder="Fit notu (ör. belde tam, boyu biraz uzun)" className={field} />
@@ -356,7 +373,7 @@ function BrandInput({ value, onChange, className }: { value: string; onChange: (
   useEffect(() => {
     if (!open) return;
     const t = setTimeout(async () => {
-      const { data } = await createClient().rpc("search_brands", { p_q: value, p_limit: 6 });
+      const { data } = await createClient().rpc("search_brands", { p_q: value, p_limit: value.trim() ? 50 : 500 });
       setOptions(data ?? []);
     }, 200);
     return () => clearTimeout(t);
@@ -376,21 +393,25 @@ function BrandInput({ value, onChange, className }: { value: string; onChange: (
         autoComplete="off"
       />
       {open && (options.length > 0 || value.trim()) && (
-        <ul className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-line bg-card shadow-lg">
-          {options.map((o) => (
-            <li key={o.id}>
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { onChange(o.name); setOpen(false); }} className="w-full px-3 py-2.5 text-left text-sm hover:bg-sand">
-                {o.name}
-              </button>
-            </li>
-          ))}
+        // Liste içinde kaydırırken input odağı kaybolmasın diye mousedown engellenir
+        <ul
+          onMouseDown={(e) => e.preventDefault()}
+          className="absolute inset-x-0 top-full z-20 mt-1 max-h-72 overflow-y-auto overscroll-contain rounded-xl border border-line bg-card shadow-lg"
+        >
           {value.trim() && !exact && (
-            <li>
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(false)} className="w-full px-3 py-2.5 text-left text-sm text-muted hover:bg-sand">
+            <li className="sticky top-0 border-b border-line bg-card">
+              <button type="button" onClick={() => setOpen(false)} className="w-full px-3 py-2.5 text-left text-sm text-muted hover:bg-sand">
                 &ldquo;{value.trim()}&rdquo; yeni marka olarak ekle
               </button>
             </li>
           )}
+          {options.map((o) => (
+            <li key={o.id}>
+              <button type="button" onClick={() => { onChange(o.name); setOpen(false); }} className="w-full px-3 py-2.5 text-left text-sm hover:bg-sand">
+                {o.name}
+              </button>
+            </li>
+          ))}
         </ul>
       )}
     </div>
